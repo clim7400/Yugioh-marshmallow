@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Yu-Gi-Oh! Web Duelist</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #121212; color: #fff; margin: 0; padding: 20px; }
+    .controls { background: #1e1e1e; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 15px; flex-wrap: wrap; align-items: center; }
+    button, input, select { padding: 8px 12px; border-radius: 4px; border: none; font-size: 14px; }
+    button { background: #d32f2f; color: white; cursor: pointer; font-weight: bold; }
+    button:hover { background: #b71c1c; }
+    .board { display: grid; grid-template-rows: 1fr 1fr; gap: 20px; background: #1b2631; padding: 20px; border-radius: 10px; border: 2px solid #34495e; }
+    .zone-row { display: flex; justify-content: center; gap: 10px; min-height: 140px; }
+    .zone { width: 95px; height: 135px; border: 2px dashed #5d6d7e; border-radius: 6px; display: flex; align-items: center; justify-content: center; position: relative; background: rgba(0,0,0,0.2); }
+    .card { width: 90px; height: 130px; cursor: pointer; transition: transform 0.2s; border-radius: 4px; }
+    .card:hover { transform: scale(1.1); z-index: 10; }
+    .defense { transform: rotate(90deg); }
+    .hand { display: flex; justify-content: center; gap: 10px; margin-top: 20px; padding: 15px; background: #1e1e1e; border-radius: 8px; min-height: 140px; flex-wrap: wrap; }
+    .stats { font-size: 18px; font-weight: bold; color: #f1c40f; }
+  </style>
+</head>
+<body>
+
+  <div class="controls">
+    <div class="stats">LP: <span id="lp">8000</span></div>
+    <button onclick="changeLP(-1000)">-1000 LP</button>
+    <button onclick="changeLP(1000)">+1000 LP</button>
+    
+    <!-- Importer un fichier .ydk depuis ton PC ou GitHub -->
+    <label>Charger un deck (.ydk) : 
+      <input type="file" id="ydkInput" accept=".ydk,.txt">
+    </label>
+
+    <!-- Charger un deck préconfiguré -->
+    <select id="presetDecks">
+      <option value="">-- Decks rapides --</option>
+      <option value="blueeyes">Deck Dragon Blanc aux Yeux Bleus</option>
+      <option value="darkmagician">Deck Magicien Sombre</option>
+    </select>
+    <button onclick="loadPreset()">Charger</button>
+    <button onclick="drawCard()">Piocher (Deck: <span id="deckCount">0</span>)</button>
+  </div>
+
+  <!-- Terrain de jeu -->
+  <div class="board">
+    <div class="zone-row" id="monsterZones">
+      <div class="zone" onclick="placeCard(this)">Monstre 1</div>
+      <div class="zone" onclick="placeCard(this)">Monstre 2</div>
+      <div class="zone" onclick="placeCard(this)">Monstre 3</div>
+      <div class="zone" onclick="placeCard(this)">Monstre 4</div>
+      <div class="zone" onclick="placeCard(this)">Monstre 5</div>
+    </div>
+    <div class="zone-row" id="spellZones">
+      <div class="zone" onclick="placeCard(this)">Magie/Piège 1</div>
+      <div class="zone" onclick="placeCard(this)">Magie/Piège 2</div>
+      <div class="zone" onclick="placeCard(this)">Magie/Piège 3</div>
+      <div class="zone" onclick="placeCard(this)">Magie/Piège 4</div>
+      <div class="zone" onclick="placeCard(this)">Magie/Piège 5</div>
+    </div>
+  </div>
+
+  <!-- Main du joueur -->
+  <h3>Ta Main (Clique sur une carte pour la sélectionner, puis clique sur une zone)</h3>
+  <div class="hand" id="playerHand"></div>
+
+  <script>
+    let deck = [];
+    let selectedCard = null;
+    let lp = 8000;
+
+    // Decks d'exemple (IDs officiels des cartes)
+    const presets = {
+      blueeyes: [89631139, 89631139, 89631139, 38517737, 38517737, 8240199, 8240199, 45467446, 53129443, 83764718],
+      darkmagician: [46986414, 46986414, 46986414, 38033121, 38033121, 7084129, 7084129, 2314238, 48680970, 83764718]
+    };
+
+    function changeLP(amount) {
+      lp += amount;
+      document.getElementById('lp').innerText = lp;
+    }
+
+    // Lecture d'un fichier .ydk
+    document.getElementById('ydkInput').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(event) {
+        const lines = event.target.result.split('\n');
+        const ids = [];
+        for (let line of lines) {
+          line = line.trim();
+          if (line === '#extra' || line === '!side') break; // On charge le Main Deck
+          if (/^\d+$/.test(line)) ids.push(line);
+        }
+        initDeck(ids);
+      };
+      reader.readAsText(file);
+    });
+
+    function loadPreset() {
+      const choice = document.getElementById('presetDecks').value;
+      if (presets[choice]) initDeck(presets[choice]);
+    }
+
+    function initDeck(cardIds) {
+      // Mélange de Fisher-Yates
+      deck = [...cardIds].sort(() => Math.random() - 0.5);
+      document.getElementById('playerHand').innerHTML = '';
+      updateDeckCount();
+      // Pioche initiale de 5 cartes
+      for (let i = 0; i < 5; i++) drawCard();
+    }
+
+    function updateDeckCount() {
+      document.getElementById('deckCount').innerText = deck.length;
+    }
+
+    async function drawCard() {
+      if (deck.length === 0) return alert("Le deck est vide !");
+      const cardId = deck.pop();
+      updateDeckCount();
+
+      try {
+        // Récupération dynamique de l'image via l'API YGOPRODeck
+        const response = await fetch(`https://ygoprodeck.com{cardId}`);
+        const data = await response.json();
+        const cardData = data.data[0];
+
+        const img = document.createElement('img');
+        img.src = cardData.card_images[0].image_url_small;
+        img.title = `${cardData.name}\n${cardData.desc}`;
+        img.className = 'card';
+        
+        // Sélectionner la carte
+        img.onclick = (e) => {
+          e.stopPropagation();
+          selectedCard = img;
+          document.querySelectorAll('.card').forEach(c => c.style.border = 'none');
+          img.style.border = '3px solid #f1c40f';
+        };
+
+        // Double-clic pour passer en position de défense
+        img.ondblclick = (e) => {
+          e.stopPropagation();
+          img.classList.toggle('defense');
+        };
+
+        document.getElementById('playerHand').appendChild(img);
+      } catch (err) {
+        console.error("Erreur lors du chargement de la carte ID :", cardId);
+      }
+    }
+
+    function placeCard(zone) {
+      if (!selectedCard) return;
+      zone.innerHTML = '';
+      selectedCard.style.border = 'none';
+      zone.appendChild(selectedCard);
+      selectedCard = null;
+    }
+  </script>
+</body>
+</html>
